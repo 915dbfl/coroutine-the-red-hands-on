@@ -1,25 +1,35 @@
 package tasks
 
 import contributors.*
+import kotlinx.coroutines.CoroutineScope
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
 import java.util.*
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.coroutineContext
 
 fun loadContributorsCallbacks(service: GitHubService, req: RequestData, updateResults: (List<User>) -> Unit) {
+    // 전체 contributors를 가져왔는지 확인하기 위한 counter
+    // gerRepoContributorsCall이 여러 개의 Thread에 동시에 호출 될 수 있기 때문에 : AtomicInteger 사용
+    val counter = AtomicInteger(0)
     service.getOrgReposCall(req.org).onResponse { responseRepos ->
         logRepos(req, responseRepos)
         val repos = responseRepos.bodyList()
+        val countDownLatch = CountDownLatch(repos.size)
         val allUsers = mutableListOf<User>()
         for (repo in repos) {
-            service.getRepoContributorsCall(req.org, repo.name).onResponse { responseUsers ->
-                logUsers(repo, responseUsers)
-                val users = responseUsers.bodyList()
-                allUsers += users
-            }
+            service.getRepoContributorsCall(req.org, repo.name)
+                .onResponse { responseUsers ->
+                    logUsers(repo, responseUsers)
+                    val users = responseUsers.bodyList()
+                    allUsers += users
+                    countDownLatch.countDown()
+                }
         }
-        // TODO: Why this code doesn't work? How to fix that?
+        countDownLatch.await()
         updateResults(allUsers.aggregate())
     }
 }
